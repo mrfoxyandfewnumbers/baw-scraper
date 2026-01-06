@@ -32,9 +32,9 @@ app.post('/baw/documents', async (req, res) => {
     const page = await browser.newPage();
     
     await page.goto('https://baw.nfz.gov.pl/NFZ/tabBrowser/mainSearch', {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+  waitUntil: 'domcontentloaded',
+  timeout: 60000
+});
     
     const response = await page.evaluate(async (kw, ps) => {
       const res = await fetch('https://baw.nfz.gov.pl/api/documents/GetDocumentsNewGrid', {
