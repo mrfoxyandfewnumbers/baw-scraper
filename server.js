@@ -6,14 +6,12 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 
 let browser = null;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Self-heal: jeśli browser padł / rozłączył się, uruchom ponownie.
- */
 async function getBrowser() {
   if (browser) {
     try {
-      await browser.version(); // sprawdza czy połączenie żyje
+      await browser.version();
       return browser;
     } catch (e) {
       try { await browser.close(); } catch (_) {}
@@ -29,7 +27,6 @@ async function getBrowser() {
     ignoreHTTPSErrors: true,
   });
 
-  // jeśli browser się rozłączy, wyczyść referencję (żeby getBrowser() go postawił od nowa)
   browser.on('disconnected', () => {
     browser = null;
   });
@@ -37,23 +34,16 @@ async function getBrowser() {
   return browser;
 }
 
-app.get('/health', async (req, res) => {
-  // nie wywołujemy tu getBrowser(), żeby /health nie odpalał Chromium
+app.get('/health', (req, res) => {
   res.json({ status: 'ok', browserActive: !!browser });
 });
 
-/**
- * Opcjonalny endpoint do "mocnego warm-up":
- * odpala Chromium (jeśli trzeba), otwiera stronę i zamyka.
- * Użyj w n8n przed /baw/documents.
- */
 app.get('/warmup-browser', async (req, res) => {
   let page;
   try {
     const b = await getBrowser();
     page = await b.newPage();
 
-    // redukcja RAM: nie ładuj ciężkich zasobów
     await page.setRequestInterception(true);
     page.on('request', (r) => {
       const type = r.resourceType();
@@ -86,7 +76,6 @@ app.post('/baw/documents', async (req, res) => {
     const b = await getBrowser();
     page = await b.newPage();
 
-    // redukcja RAM: blokuj fonty/obrazy/CSS
     await page.setRequestInterception(true);
     page.on('request', (r) => {
       const type = r.resourceType();
@@ -96,14 +85,12 @@ app.post('/baw/documents', async (req, res) => {
       return r.continue();
     });
 
-    // Stabilniejsze niż networkidle2
     await page.goto('https://baw.nfz.gov.pl/NFZ/tabBrowser/mainSearch', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
 
-    // krótki oddech po wejściu (czasem pomaga na zimnym starcie)
-    await page.waitForTimeout(800);
+    await sleep(800);
 
     const response = await page.evaluate(async (kw, ps) => {
       const r = await fetch('https://baw.nfz.gov.pl/api/documents/GetDocumentsNewGrid', {
@@ -120,7 +107,6 @@ app.post('/baw/documents', async (req, res) => {
         })
       });
 
-      // diagnostyka: jak zwróci HTML zamiast JSON (blokada), to to zobaczysz
       const text = await r.text();
       try {
         return JSON.parse(text);
@@ -138,7 +124,6 @@ app.post('/baw/documents', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   } finally {
-    // kluczowe: zawsze zamykaj stronę, żeby nie zjadało RAM
     if (page) {
       try { await page.close(); } catch (_) {}
     }
